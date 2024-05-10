@@ -4,6 +4,7 @@ name = "ppaass-agent"
 version = "0.1.34"
 license = "MIT"
 description = "The agent part of the ppaass application"
+repository = "https://github.com/quhxuxm/ppaass-agent"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [[bin]]
