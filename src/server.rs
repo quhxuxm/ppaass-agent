@@ -21,12 +21,10 @@ use anyhow::Result;
 use ppaass_protocol::message::values::address::PpaassUnifiedAddress;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
-use tokio::{
-    net::{TcpListener, TcpStream},
-    time::interval,
-};
+use tokio::{net::TcpListener, time::interval};
 
 use tokio_io_timeout::TimeoutStream;
+use tokio_tfo::{TfoListener, TfoStream};
 use tracing::{debug, error, info};
 
 const AGENT_SEVER_EVENT_CHANNEL_BUF: usize = 1024;
@@ -80,6 +78,13 @@ impl AgentServer {
                         },
                     )
                     .await;
+                    return;
+                }
+            };
+            let tcp_listener = match TfoListener::from_tokio(tcp_listener) {
+                Ok(tcp_listener) => tcp_listener,
+                Err(e) => {
+                    error!("Fail to use fast open on tcp listener because of error: {e:?}");
                     return;
                 }
             };
@@ -181,8 +186,8 @@ impl AgentServer {
 
     async fn accept_client_connection(
         config: &AgentServerConfig,
-        tcp_listener: &TcpListener,
-    ) -> Result<(TimeoutStream<TcpStream>, SocketAddr), AgentServerError> {
+        tcp_listener: &TfoListener,
+    ) -> Result<(TimeoutStream<TfoStream>, SocketAddr), AgentServerError> {
         let (client_tcp_stream, client_socket_address) = tcp_listener.accept().await?;
         client_tcp_stream.set_nodelay(true)?;
         let mut client_tcp_stream = TimeoutStream::new(client_tcp_stream);
@@ -196,7 +201,7 @@ impl AgentServer {
     }
 
     fn handle_client_connection(
-        client_tcp_stream: TimeoutStream<TcpStream>,
+        client_tcp_stream: TimeoutStream<TfoStream>,
         client_socket_address: PpaassUnifiedAddress,
         client_dispatcher: ClientDispatcher<AgentServerRsaCryptoFetcher>,
         server_event_tx: Sender<AgentServerEvent>,

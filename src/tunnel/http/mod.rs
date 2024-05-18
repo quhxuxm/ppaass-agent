@@ -17,9 +17,8 @@ use ppaass_protocol::message::payload::tcp::{ProxyTcpInitResult, ProxyTcpPayload
 use ppaass_protocol::message::values::address::PpaassUnifiedAddress;
 use ppaass_protocol::message::values::encryption::PpaassMessagePayloadEncryptionSelector;
 use ppaass_protocol::message::{PpaassProxyMessage, PpaassProxyMessagePayload};
-use tokio::net::TcpStream;
 use tokio::sync::mpsc::Sender;
-
+use tokio_tfo::TfoStream;
 use tokio_util::codec::{Framed, FramedParts};
 use tracing::{debug, error};
 use url::Url;
@@ -49,7 +48,7 @@ pub(crate) struct HttpTunnel<F>
 where
     F: RsaCryptoFetcher + Send + Sync + 'static,
 {
-    client_tcp_stream: Pin<Box<TimeoutStream<TcpStream>>>,
+    client_tcp_stream: Pin<Box<TimeoutStream<TfoStream>>>,
     src_address: PpaassUnifiedAddress,
     initial_buf: BytesMut,
     client_socket_address: PpaassUnifiedAddress,
@@ -65,7 +64,7 @@ where
 {
     pub(crate) fn new(
         request: TunnelCreateRequest<F>,
-        client_tcp_stream: Pin<Box<TimeoutStream<TcpStream>>>,
+        client_tcp_stream: Pin<Box<TimeoutStream<TfoStream>>>,
         initial_buf: BytesMut,
     ) -> Self {
         Self {

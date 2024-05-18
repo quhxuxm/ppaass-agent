@@ -9,8 +9,8 @@ use ppaass_protocol::message::values::address::PpaassUnifiedAddress;
 use tokio_io_timeout::TimeoutStream;
 use tracing::{debug, error};
 
-use tokio::{net::TcpStream, sync::mpsc::Sender};
-
+use tokio::sync::mpsc::Sender;
+use tokio_tfo::TfoStream;
 use tokio_util::codec::{Decoder, Framed, FramedParts};
 
 use crate::{
@@ -86,7 +86,7 @@ where
 
     pub(crate) async fn dispatch(
         &self,
-        client_tcp_stream: TimeoutStream<TcpStream>,
+        client_tcp_stream: TimeoutStream<TfoStream>,
         client_socket_address: &PpaassUnifiedAddress,
         server_event_tx: &Sender<AgentServerEvent>,
         upload_bytes_amount: Arc<AtomicU64>,

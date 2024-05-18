@@ -6,6 +6,7 @@ use ppaass_crypto::crypto::RsaCryptoFetcher;
 use tokio::{net::TcpStream, time::timeout};
 
 use tokio_io_timeout::TimeoutStream;
+use tokio_tfo::TfoStream;
 use tokio_util::codec::Framed;
 use tracing::{debug, error};
 
@@ -47,7 +48,7 @@ where
 
     pub(crate) async fn create_proxy_connection(
         &self,
-    ) -> Result<Framed<TimeoutStream<TcpStream>, PpaassProxyEdgeCodec<Arc<F>>>, AgentServerError>
+    ) -> Result<Framed<TimeoutStream<TfoStream>, PpaassProxyEdgeCodec<Arc<F>>>, AgentServerError>
     {
         debug!("Take proxy connection from pool.");
         let proxy_tcp_stream = match timeout(
@@ -72,6 +73,7 @@ where
         debug!("Success connect to proxy.");
         proxy_tcp_stream.set_nodelay(true)?;
         proxy_tcp_stream.set_linger(None)?;
+        let proxy_tcp_stream = TfoStream::from(proxy_tcp_stream);
         let mut proxy_tcp_stream = TimeoutStream::new(proxy_tcp_stream);
         proxy_tcp_stream.set_read_timeout(Some(Duration::from_secs(
             self.config.proxy_connection_read_timeout(),

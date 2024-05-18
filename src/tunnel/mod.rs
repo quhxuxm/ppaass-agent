@@ -16,21 +16,21 @@ use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 
 use ppaass_crypto::crypto::RsaCryptoFetcher;
-use tracing::{debug, error};
-use std::pin::Pin;
 use ppaass_protocol::generator::PpaassMessageGenerator;
 use ppaass_protocol::message::payload::tcp::ProxyTcpPayload;
 use ppaass_protocol::message::values::address::PpaassUnifiedAddress;
 use ppaass_protocol::message::values::encryption::PpaassMessagePayloadEncryption;
 use ppaass_protocol::message::{PpaassAgentMessage, PpaassProxyMessage, PpaassProxyMessagePayload};
+use std::pin::Pin;
+use tracing::{debug, error};
 
 use crate::codec::PpaassProxyEdgeCodec;
 
 use crate::event::AgentServerEvent;
-use tokio::net::TcpStream;
 use tokio::sync::mpsc::Sender;
 use tokio_io_timeout::TimeoutStream;
 use tokio_stream::StreamExt as TokioStreamExt;
+use tokio_tfo::TfoStream;
 use tokio_util::codec::{BytesCodec, Framed};
 
 struct TunnelTcpDataRelay<F>
@@ -38,13 +38,13 @@ where
     F: RsaCryptoFetcher,
 {
     tunnel_id: String,
-    client_tcp_stream: Pin<Box<TimeoutStream<TcpStream>>>,
+    client_tcp_stream: Pin<Box<TimeoutStream<TfoStream>>>,
     client_socket_address: PpaassUnifiedAddress,
     src_address: PpaassUnifiedAddress,
     dst_address: PpaassUnifiedAddress,
     proxy_connection_write:
-        SplitSink<Framed<TimeoutStream<TcpStream>, PpaassProxyEdgeCodec<F>>, PpaassAgentMessage>,
-    proxy_connection_read: SplitStream<Framed<TimeoutStream<TcpStream>, PpaassProxyEdgeCodec<F>>>,
+        SplitSink<Framed<TimeoutStream<TfoStream>, PpaassProxyEdgeCodec<F>>, PpaassAgentMessage>,
+    proxy_connection_read: SplitStream<Framed<TimeoutStream<TfoStream>, PpaassProxyEdgeCodec<F>>>,
     init_data: Option<Bytes>,
     payload_encryption: PpaassMessagePayloadEncryption,
     upload_bytes_amount: Arc<AtomicU64>,

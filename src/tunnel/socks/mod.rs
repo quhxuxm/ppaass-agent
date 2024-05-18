@@ -24,11 +24,8 @@ use tokio_io_timeout::TimeoutStream;
 use tracing::{debug, error, info};
 
 use tokio::sync::mpsc::Sender;
-use tokio::{
-    io::AsyncReadExt,
-    net::{TcpStream, UdpSocket},
-};
-
+use tokio::{io::AsyncReadExt, net::UdpSocket};
+use tokio_tfo::TfoStream;
 use tokio_util::codec::{Framed, FramedParts};
 
 use self::message::{Socks5InitCommandResultStatus, Socks5UdpDataPacket};
@@ -65,7 +62,7 @@ where
     pub dst_address: PpaassUnifiedAddress,
     pub client_socket_address: PpaassUnifiedAddress,
     pub socks5_init_framed:
-        Framed<Pin<Box<TimeoutStream<TcpStream>>>, Socks5InitCommandContentCodec>,
+        Framed<Pin<Box<TimeoutStream<TfoStream>>>, Socks5InitCommandContentCodec>,
     pub upload_bytes_amount: Arc<AtomicU64>,
     pub download_bytes_amount: Arc<AtomicU64>,
     pub stopped_status: Arc<AtomicBool>,
@@ -76,7 +73,7 @@ where
     F: RsaCryptoFetcher + Send + Sync + 'static,
 {
     config: Arc<AgentServerConfig>,
-    client_tcp_stream: Pin<Box<TimeoutStream<TcpStream>>>,
+    client_tcp_stream: Pin<Box<TimeoutStream<TfoStream>>>,
     src_address: PpaassUnifiedAddress,
     initial_buf: BytesMut,
     client_socket_address: PpaassUnifiedAddress,
@@ -91,7 +88,7 @@ where
 {
     pub(crate) fn new(
         create_request: TunnelCreateRequest<F>,
-        client_tcp_stream: Pin<Box<TimeoutStream<TcpStream>>>,
+        client_tcp_stream: Pin<Box<TimeoutStream<TfoStream>>>,
         initial_buf: BytesMut,
     ) -> Self {
         Self {
@@ -248,7 +245,7 @@ where
     async fn start_udp_relay(
         config: &AgentServerConfig,
         proxy_connection_factory: &ProxyConnectionFactory<F>,
-        client_tcp_stream: Pin<Box<TimeoutStream<TcpStream>>>,
+        client_tcp_stream: Pin<Box<TimeoutStream<TfoStream>>>,
         agent_udp_bind_socket: UdpSocket,
         client_udp_restrict_address: PpaassUnifiedAddress,
     ) -> Result<(), AgentServerError> {
@@ -264,13 +261,13 @@ where
     }
 
     async fn check_udp_relay_tcp_connection(
-        mut client_tcp_stream: Pin<Box<TimeoutStream<TcpStream>>>,
+        mut client_tcp_stream: Pin<Box<TimeoutStream<TfoStream>>>,
     ) -> Result<(), AgentServerError> {
         loop {
             let mut client_data_buf = [0u8; 1];
             let size = client_tcp_stream.read(&mut client_data_buf).await?;
             if size == 0 {
-                info!("Client udp associate tcp stream closed: {client_tcp_stream:?}");
+                info!("Client udp associate tcp stream closed.");
                 return Ok(());
             }
         }
@@ -347,7 +344,7 @@ where
         src_address: PpaassUnifiedAddress,
         dst_address: PpaassUnifiedAddress,
         mut socks5_init_framed: Framed<
-            Pin<Box<TimeoutStream<TcpStream>>>,
+            Pin<Box<TimeoutStream<TfoStream>>>,
             Socks5InitCommandContentCodec,
         >,
     ) -> Result<(), AgentServerError> {
@@ -359,7 +356,7 @@ where
         proxy_connection_factory: &ProxyConnectionFactory<F>,
         client_udp_restrict_address: PpaassUnifiedAddress,
         mut socks5_init_framed: Framed<
-            Pin<Box<TimeoutStream<TcpStream>>>,
+            Pin<Box<TimeoutStream<TfoStream>>>,
             Socks5InitCommandContentCodec,
         >,
     ) -> Result<(), AgentServerError> {
