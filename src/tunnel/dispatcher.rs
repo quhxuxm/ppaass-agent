@@ -1,18 +1,3 @@
-use std::mem::size_of;
-use std::sync::{atomic::AtomicU64, Arc};
-
-use bytes::BytesMut;
-use futures_util::StreamExt;
-
-use ppaass_crypto::crypto::RsaCryptoFetcher;
-use ppaass_protocol::message::values::address::PpaassUnifiedAddress;
-use tokio_io_timeout::TimeoutStream;
-use tracing::{debug, error};
-
-use tokio::sync::mpsc::Sender;
-use tokio_tfo::TfoStream;
-use tokio_util::codec::{Decoder, Framed, FramedParts};
-
 use crate::{
     config::AgentServerConfig,
     error::AgentServerError,
@@ -22,7 +7,17 @@ use crate::{
     tunnel::{bo::TunnelCreateRequest, http::HttpTunnel, socks::Socks5Tunnel},
     SOCKS_V4, SOCKS_V5,
 };
-
+use bytes::BytesMut;
+use futures_util::StreamExt;
+use ppaass_crypto::crypto::RsaCryptoFetcher;
+use ppaass_protocol::message::values::address::UnifiedAddress;
+use std::mem::size_of;
+use std::sync::{atomic::AtomicU64, Arc};
+use tokio::sync::mpsc::Sender;
+use tokio_io_timeout::TimeoutStream;
+use tokio_tfo::TfoStream;
+use tokio_util::codec::{Decoder, Framed, FramedParts};
+use tracing::{debug, error};
 pub(crate) enum Tunnel<F>
 where
     F: RsaCryptoFetcher + Send + Sync + 'static,
@@ -62,21 +57,21 @@ impl Decoder for SwitchClientProtocolDecoder {
 }
 
 #[derive(Clone)]
-pub(crate) struct ClientDispatcher<F>
+pub(crate) struct ClientDispatcher<'a, F>
 where
     F: RsaCryptoFetcher + Send + Sync + 'static,
 {
     config: Arc<AgentServerConfig>,
-    proxy_connection_factory: Arc<ProxyConnectionFactory<F>>,
+    proxy_connection_factory: Arc<ProxyConnectionFactory<'a, F>>,
 }
 
-impl<F> ClientDispatcher<F>
+impl<'a, F> ClientDispatcher<'a, F>
 where
     F: RsaCryptoFetcher + Send + Sync + 'static,
 {
     pub(crate) fn new(
         config: Arc<AgentServerConfig>,
-        proxy_connection_factory: ProxyConnectionFactory<F>,
+        proxy_connection_factory: ProxyConnectionFactory<'a, F>,
     ) -> Self {
         Self {
             config,
@@ -87,7 +82,7 @@ where
     pub(crate) async fn dispatch(
         &self,
         client_tcp_stream: TimeoutStream<TfoStream>,
-        client_socket_address: &PpaassUnifiedAddress,
+        client_socket_address: &UnifiedAddress,
         server_event_tx: &Sender<AgentServerEvent>,
         upload_bytes_amount: Arc<AtomicU64>,
         download_bytes_amount: Arc<AtomicU64>,

@@ -1,13 +1,9 @@
 use std::sync::Arc;
 use std::{collections::HashMap, fs::File};
-
 use crate::{config::AgentServerConfig, error::AgentServerError};
-
 use ppaass_crypto::crypto::{RsaCrypto, RsaCryptoFetcher};
 use ppaass_crypto::error::CryptoError;
-use ppaass_protocol::message::values::encryption::PpaassMessagePayloadEncryptionSelector;
 use tracing::error;
-
 #[derive(Clone)]
 pub(crate) struct AgentServerRsaCryptoFetcher {
     cache: Arc<HashMap<String, RsaCrypto>>,
@@ -66,7 +62,3 @@ impl RsaCryptoFetcher for AgentServerRsaCryptoFetcher {
         Ok(self.cache.get(user_token.as_ref()))
     }
 }
-
-pub(crate) struct AgentServerPayloadEncryptionTypeSelector;
-
-impl PpaassMessagePayloadEncryptionSelector for AgentServerPayloadEncryptionTypeSelector {}

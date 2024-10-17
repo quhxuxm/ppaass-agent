@@ -7,7 +7,8 @@ use crate::{
     proxy::ProxyConnectionFactory,
     tunnel::dispatcher::{ClientDispatcher, Tunnel},
 };
-
+use anyhow::Result;
+use ppaass_protocol::message::values::address::UnifiedAddress;
 use std::{net::SocketAddr, sync::atomic::AtomicBool};
 use std::{
     sync::{
@@ -16,17 +17,11 @@ use std::{
     },
     time::Duration,
 };
-
-use anyhow::Result;
-use ppaass_protocol::message::values::address::PpaassUnifiedAddress;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
-
 use tokio::{net::TcpListener, time::interval};
-
 use tokio_io_timeout::TimeoutStream;
 use tokio_tfo::{TfoListener, TfoStream};
 use tracing::{debug, error, info};
-
 const AGENT_SEVER_EVENT_CHANNEL_BUF: usize = 1024;
 const AGENT_SEVER_COMMAND_CHANNEL_BUF: usize = 1024;
 const ONE_MB: u64 = 1024 * 1024;
@@ -40,7 +35,7 @@ impl AgentServer {
     pub fn new(config: Arc<AgentServerConfig>) -> Result<Self> {
         let rsa_crypto_fetcher = AgentServerRsaCryptoFetcher::new(&config)?;
         let proxy_connection_factory =
-            ProxyConnectionFactory::new(config.clone(), rsa_crypto_fetcher)?;
+            ProxyConnectionFactory::new(config.clone(), &rsa_crypto_fetcher)?;
         let client_dispatcher = ClientDispatcher::new(config.clone(), proxy_connection_factory);
         Ok(Self {
             config,
@@ -202,7 +197,7 @@ impl AgentServer {
 
     fn handle_client_connection(
         client_tcp_stream: TimeoutStream<TfoStream>,
-        client_socket_address: PpaassUnifiedAddress,
+        client_socket_address: UnifiedAddress,
         client_dispatcher: ClientDispatcher<AgentServerRsaCryptoFetcher>,
         server_event_tx: Sender<AgentServerEvent>,
         upload_bytes_amount: Arc<AtomicU64>,

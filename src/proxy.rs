@@ -1,34 +1,31 @@
+use crate::config::AgentServerConfig;
+use crate::error::AgentServerError;
+use ppaass_codec::codec::PacketCodec;
+use ppaass_crypto::crypto::RsaCryptoFetcher;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::{net::SocketAddr, time::Duration};
-
-use ppaass_crypto::crypto::RsaCryptoFetcher;
 use tokio::{net::TcpStream, time::timeout};
-
 use tokio_io_timeout::TimeoutStream;
 use tokio_tfo::TfoStream;
 use tokio_util::codec::Framed;
 use tracing::{debug, error};
-
-use crate::error::AgentServerError;
-use crate::{codec::PpaassProxyEdgeCodec, config::AgentServerConfig};
-
-pub(crate) struct ProxyConnectionFactory<F>
+pub(crate) struct ProxyConnectionFactory<'a, F>
 where
     F: RsaCryptoFetcher,
 {
     proxy_addresses: Vec<SocketAddr>,
     config: Arc<AgentServerConfig>,
-    rsa_crypto_fetcher: Arc<F>,
+    rsa_crypto_fetcher: &'a F,
 }
 
-impl<F> ProxyConnectionFactory<F>
+impl<'a, F> ProxyConnectionFactory<'a, F>
 where
     F: RsaCryptoFetcher + Send + Sync + 'static,
 {
     pub(crate) fn new(
         config: Arc<AgentServerConfig>,
-        rsa_crypto_fetcher: F,
+        rsa_crypto_fetcher: &'a F,
     ) -> Result<Self, AgentServerError> {
         let proxy_addresses_configuration = config.proxy_addresses();
         let proxy_addresses: Vec<SocketAddr> = proxy_addresses_configuration
@@ -42,14 +39,13 @@ where
         Ok(Self {
             proxy_addresses,
             config,
-            rsa_crypto_fetcher: Arc::new(rsa_crypto_fetcher),
+            rsa_crypto_fetcher,
         })
     }
 
     pub(crate) async fn create_proxy_connection(
         &self,
-    ) -> Result<Framed<TimeoutStream<TfoStream>, PpaassProxyEdgeCodec<Arc<F>>>, AgentServerError>
-    {
+    ) -> Result<Framed<TimeoutStream<TfoStream>, PacketCodec<'a, F>>, AgentServerError> {
         debug!("Take proxy connection from pool.");
         let proxy_tcp_stream = match timeout(
             Duration::from_secs(self.config.connect_to_proxy_timeout()),
@@ -83,7 +79,7 @@ where
         )));
         let proxy_connection = Framed::with_capacity(
             proxy_tcp_stream,
-            PpaassProxyEdgeCodec::new(self.config.compress(), self.rsa_crypto_fetcher.clone()),
+            PacketCodec::new(self.rsa_crypto_fetcher),
             self.config.proxy_send_buffer_size(),
         );
         Ok(proxy_connection)

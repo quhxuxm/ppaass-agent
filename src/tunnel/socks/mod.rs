@@ -1,41 +1,12 @@
 mod codec;
 mod message;
-
-use std::pin::Pin;
-use std::sync::{atomic::AtomicU64, Arc};
-use std::{
-    net::{SocketAddr, ToSocketAddrs},
-    sync::atomic::AtomicBool,
-};
-
-use bytes::{Bytes, BytesMut};
-
-use futures::{SinkExt, StreamExt};
-
-use ppaass_crypto::{crypto::RsaCryptoFetcher, random_32_bytes};
-use ppaass_protocol::generator::PpaassMessageGenerator;
-use ppaass_protocol::message::payload::tcp::{ProxyTcpInitResult, ProxyTcpPayload};
-use ppaass_protocol::message::payload::udp::ProxyUdpPayload;
-use ppaass_protocol::message::values::address::PpaassUnifiedAddress;
-use ppaass_protocol::message::values::encryption::PpaassMessagePayloadEncryptionSelector;
-use ppaass_protocol::message::{PpaassProxyMessage, PpaassProxyMessagePayload};
-
-use tokio_io_timeout::TimeoutStream;
-use tracing::{debug, error, info};
-
-use tokio::sync::mpsc::Sender;
-use tokio::{io::AsyncReadExt, net::UdpSocket};
-use tokio_tfo::TfoStream;
-use tokio_util::codec::{Framed, FramedParts};
-
 use self::message::{Socks5InitCommandResultStatus, Socks5UdpDataPacket};
-
+use super::{bo::TunnelCreateRequest, tcp_relay};
+use crate::event::AgentServerEvent;
 use crate::{
     config::AgentServerConfig, crypto::AgentServerPayloadEncryptionTypeSelector,
     proxy::ProxyConnectionFactory, publish_server_event,
 };
-
-use crate::event::AgentServerEvent;
 use crate::{
     error::AgentServerError,
     tunnel::{
@@ -49,18 +20,39 @@ use crate::{
         TunnelTcpDataRelay,
     },
 };
-
-use super::{bo::TunnelCreateRequest, tcp_relay};
-
-struct Socks5HandleConnectCommandRequest<'config, 'proxyfactory, F>
+use bytes::{Bytes, BytesMut};
+use futures::{SinkExt, StreamExt};
+use ppaass_crypto::{crypto::RsaCryptoFetcher, random_32_bytes};
+use ppaass_protocol::generator::PpaassMessageGenerator;
+use ppaass_protocol::message::payload::tcp::{ProxyTcpInitResult, ProxyTcpPayload};
+use ppaass_protocol::message::payload::udp::ProxyUdpPayload;
+use ppaass_protocol::message::values::address::UnifiedAddress;
+use ppaass_protocol::message::values::encryption::PpaassMessagePayloadEncryptionSelector;
+use ppaass_protocol::message::{
+    Encryption, Packet, Payload, PpaassProxyMessage, PpaassProxyMessagePayload,
+};
+use std::pin::Pin;
+use std::sync::{atomic::AtomicU64, Arc};
+use std::{
+    net::{SocketAddr, ToSocketAddrs},
+    sync::atomic::AtomicBool,
+};
+use tokio::sync::mpsc::Sender;
+use tokio::{io::AsyncReadExt, net::UdpSocket};
+use tokio_io_timeout::TimeoutStream;
+use tokio_tfo::TfoStream;
+use tokio_util::codec::{Framed, FramedParts};
+use tracing::{debug, error, info};
+use uuid::Uuid;
+struct Socks5HandleConnectCommandRequest<'config, 'proxyfactory, 'fetcher, F>
 where
     F: RsaCryptoFetcher + Send + Sync + 'static,
 {
     pub config: &'config AgentServerConfig,
-    pub proxy_connection_factory: &'proxyfactory ProxyConnectionFactory<F>,
-    pub src_address: PpaassUnifiedAddress,
-    pub dst_address: PpaassUnifiedAddress,
-    pub client_socket_address: PpaassUnifiedAddress,
+    pub proxy_connection_factory: &'proxyfactory ProxyConnectionFactory<'fetcher, F>,
+    pub src_address: UnifiedAddress,
+    pub dst_address: UnifiedAddress,
+    pub client_socket_address: UnifiedAddress,
     pub socks5_init_framed:
         Framed<Pin<Box<TimeoutStream<TfoStream>>>, Socks5InitCommandContentCodec>,
     pub upload_bytes_amount: Arc<AtomicU64>,
@@ -68,26 +60,26 @@ where
     pub stopped_status: Arc<AtomicBool>,
 }
 
-pub(crate) struct Socks5Tunnel<F>
+pub(crate) struct Socks5Tunnel<'fetcher, F>
 where
     F: RsaCryptoFetcher + Send + Sync + 'static,
 {
     config: Arc<AgentServerConfig>,
     client_tcp_stream: Pin<Box<TimeoutStream<TfoStream>>>,
-    src_address: PpaassUnifiedAddress,
+    src_address: UnifiedAddress,
     initial_buf: BytesMut,
-    client_socket_address: PpaassUnifiedAddress,
-    proxy_connection_factory: Arc<ProxyConnectionFactory<F>>,
+    client_socket_address: UnifiedAddress,
+    proxy_connection_factory: Arc<ProxyConnectionFactory<'fetcher, F>>,
     upload_bytes_amount: Arc<AtomicU64>,
     download_bytes_amount: Arc<AtomicU64>,
 }
 
-impl<F> Socks5Tunnel<F>
+impl<'fetcher, F> Socks5Tunnel<'fetcher, F>
 where
     F: RsaCryptoFetcher + Send + Sync + 'static,
 {
     pub(crate) fn new(
-        create_request: TunnelCreateRequest<F>,
+        create_request: TunnelCreateRequest<'fetcher, F>,
         client_tcp_stream: Pin<Box<TimeoutStream<TfoStream>>>,
         initial_buf: BytesMut,
     ) -> Self {
@@ -244,10 +236,10 @@ where
 
     async fn start_udp_relay(
         config: &AgentServerConfig,
-        proxy_connection_factory: &ProxyConnectionFactory<F>,
+        proxy_connection_factory: &ProxyConnectionFactory<'fetcher, F>,
         client_tcp_stream: Pin<Box<TimeoutStream<TfoStream>>>,
         agent_udp_bind_socket: UdpSocket,
-        client_udp_restrict_address: PpaassUnifiedAddress,
+        client_udp_restrict_address: UnifiedAddress,
     ) -> Result<(), AgentServerError> {
         debug!("Agent begin to relay udp packet for client: {client_udp_restrict_address:?}");
         tokio::select! {
@@ -275,18 +267,17 @@ where
 
     async fn relay_udp_data(
         config: &AgentServerConfig,
-        proxy_connection_factory: &ProxyConnectionFactory<F>,
-        client_udp_restrict_address: PpaassUnifiedAddress,
+        proxy_connection_factory: &ProxyConnectionFactory<'fetcher, F>,
+        client_udp_restrict_address: UnifiedAddress,
         agent_udp_bind_socket: UdpSocket,
     ) -> Result<(), AgentServerError> {
         let user_token = config.user_token();
-        let payload_encryption =
-            AgentServerPayloadEncryptionTypeSelector::select(user_token, Some(random_32_bytes()));
+        let payload_encryption = Encryption::Aes(random_32_bytes());
         loop {
             let mut client_udp_buf = [0u8; 65535];
             let (len, client_udp_address) =
                 agent_udp_bind_socket.recv_from(&mut client_udp_buf).await?;
-            let src_address: PpaassUnifiedAddress = client_udp_address.into();
+            let src_address: UnifiedAddress = client_udp_address.into();
             if client_udp_restrict_address != src_address {
                 error!("The udp packet sent from client not valid, client udp restrict address: {client_udp_restrict_address}, src address: {src_address}");
                 continue;
@@ -295,7 +286,7 @@ where
             let client_udp_bytes = Bytes::from_iter(client_udp_buf);
             let client_to_dst_socks5_udp_packet: Socks5UdpDataPacket =
                 client_udp_bytes.try_into()?;
-            let dst_address: PpaassUnifiedAddress = client_to_dst_socks5_udp_packet.address.into();
+            let dst_address: UnifiedAddress = client_to_dst_socks5_udp_packet.address.into();
             let agent_udp_message = PpaassMessageGenerator::generate_agent_udp_data_message(
                 user_token.to_string(),
                 payload_encryption.clone(),
@@ -341,8 +332,8 @@ where
 
     #[allow(unused)]
     async fn handle_bind_command(
-        src_address: PpaassUnifiedAddress,
-        dst_address: PpaassUnifiedAddress,
+        src_address: UnifiedAddress,
+        dst_address: UnifiedAddress,
         mut socks5_init_framed: Framed<
             Pin<Box<TimeoutStream<TfoStream>>>,
             Socks5InitCommandContentCodec,
@@ -353,8 +344,8 @@ where
 
     async fn handle_udp_associate_command(
         config: &AgentServerConfig,
-        proxy_connection_factory: &ProxyConnectionFactory<F>,
-        client_udp_restrict_address: PpaassUnifiedAddress,
+        proxy_connection_factory: &ProxyConnectionFactory<'fetcher, F>,
+        client_udp_restrict_address: UnifiedAddress,
         mut socks5_init_framed: Framed<
             Pin<Box<TimeoutStream<TfoStream>>>,
             Socks5InitCommandContentCodec,
@@ -388,7 +379,7 @@ where
     }
 
     async fn handle_connect_command(
-        request: Socks5HandleConnectCommandRequest<'_, '_, F>,
+        request: Socks5HandleConnectCommandRequest<'_, '_, 'fetcher, F>,
         server_event_tx: &Sender<AgentServerEvent>,
     ) -> Result<(), AgentServerError> {
         let Socks5HandleConnectCommandRequest {
@@ -403,7 +394,7 @@ where
             stopped_status,
         } = request;
         match &dst_address {
-            PpaassUnifiedAddress::Ip(socket_addr) => {
+            UnifiedAddress::Ip(socket_addr) => {
                 if socket_addr.ip().is_multicast() {
                     publish_server_event(server_event_tx, AgentServerEvent::TunnelInitializeFail { client_socket_address:client_socket_address.clone(), src_address: Some(src_address.clone()), dst_address: Some(dst_address.clone()), reason: format!("Client connection [{client_socket_address}] initialize socks5 tunnel from [{src_address}] to [{dst_address}] fail because of destination address is multicast.") }).await;
                     return Err(AgentServerError::Other(format!(
@@ -443,7 +434,7 @@ where
                     }
                 }
             }
-            PpaassUnifiedAddress::Domain { host, port } => {
+            UnifiedAddress::Domain { host, port } => {
                 if host.eq("0.0.0.1") || host.eq("127.0.0.1") || host.eq("localhost") {
                     publish_server_event(server_event_tx, AgentServerEvent::TunnelInitializeFail { client_socket_address:client_socket_address.clone(), src_address: Some(src_address.clone()), dst_address: Some(dst_address.clone()), reason: format!("Client connection [{client_socket_address}] initialize socks5 tunnel from [{src_address}] to [{dst_address}] fail because of destination address is local address.") }).await;
                     return Err(AgentServerError::Other(format!(
@@ -454,14 +445,14 @@ where
         };
 
         let user_token = config.user_token();
-        let payload_encryption =
-            AgentServerPayloadEncryptionTypeSelector::select(user_token, Some(random_32_bytes()));
-        let tcp_init_request = PpaassMessageGenerator::generate_agent_tcp_init_message(
-            user_token.to_string(),
-            src_address.clone(),
-            dst_address.clone(),
-            payload_encryption.clone(),
-        )?;
+        let payload_encryption = Encryption::Aes(random_32_bytes());
+        let key_exchange = Packet::new(
+            Uuid::new_v4().to_string(),
+            user_token.to_owned(),
+            payload_encryption,
+            Payload::KeyExchange.try_into()?,
+        );
+
         let proxy_connection = match proxy_connection_factory.create_proxy_connection().await {
             Ok(proxy_connection) => proxy_connection,
             Err(e) => {
@@ -489,7 +480,7 @@ where
         .await;
         let (mut proxy_connection_write, mut proxy_connection_read) = proxy_connection.split();
         debug!("Client tcp connection [{src_address}] success create proxy connection.",);
-        if let Err(e) = proxy_connection_write.send(tcp_init_request).await {
+        if let Err(e) = proxy_connection_write.send(key_exchange).await {
             error!("Client connection [{client_socket_address}] initialize socks5 tunnel from [{src_address}] to [{dst_address}] fail because of error when create proxy connection: {e:?}");
             publish_server_event(server_event_tx, AgentServerEvent::TunnelInitializeFail {
                 client_socket_address: client_socket_address.clone(),

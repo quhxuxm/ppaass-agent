@@ -1,8 +1,6 @@
 use event::AgentServerEvent;
 use tokio::sync::mpsc::Sender;
 use tracing::error;
-
-mod codec;
 pub mod command;
 pub mod config;
 mod crypto;

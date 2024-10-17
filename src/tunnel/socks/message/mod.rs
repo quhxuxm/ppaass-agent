@@ -1,22 +1,17 @@
 mod auth;
 mod init;
 mod udp;
-
 use std::fmt::Display;
 use std::{
     fmt::Debug,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs},
 };
-
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use ppaass_protocol::message::values::address::PpaassUnifiedAddress;
-
+use ppaass_protocol::message::values::address::UnifiedAddress;
 pub(crate) use auth::*;
 pub(crate) use init::*;
 pub(crate) use udp::*;
-
 use crate::error::AgentServerError;
-
 const IPV4_FLAG: u8 = 1;
 const IPV6_FLAG: u8 = 4;
 const DOMAIN_FLAG: u8 = 3;
@@ -177,21 +172,21 @@ impl From<Socks5Address> for Bytes {
     }
 }
 
-impl From<Socks5Address> for PpaassUnifiedAddress {
+impl From<Socks5Address> for UnifiedAddress {
     fn from(value: Socks5Address) -> Self {
         match value {
-            Socks5Address::Ip(socket_addr) => PpaassUnifiedAddress::Ip(socket_addr),
-            Socks5Address::Domain(host, port) => PpaassUnifiedAddress::Domain { host, port },
+            Socks5Address::Ip(socket_addr) => UnifiedAddress::Ip(socket_addr),
+            Socks5Address::Domain(host, port) => UnifiedAddress::Domain { host, port },
         }
     }
 }
 
-impl TryFrom<PpaassUnifiedAddress> for Socks5Address {
+impl TryFrom<UnifiedAddress> for Socks5Address {
     type Error = AgentServerError;
-    fn try_from(net_addr: PpaassUnifiedAddress) -> Result<Self, Self::Error> {
+    fn try_from(net_addr: UnifiedAddress) -> Result<Self, Self::Error> {
         match net_addr {
-            PpaassUnifiedAddress::Ip(socket_addr) => Ok(Socks5Address::Ip(socket_addr)),
-            PpaassUnifiedAddress::Domain { host, port } => Ok(Socks5Address::Domain(host, port)),
+            UnifiedAddress::Ip(socket_addr) => Ok(Socks5Address::Ip(socket_addr)),
+            UnifiedAddress::Domain { host, port } => Ok(Socks5Address::Domain(host, port)),
         }
     }
 }
