@@ -22,9 +22,9 @@ lto = "fat"
 
 [dependencies]
 mimalloc = "0"
-ppaass-protocol = "0.1.3"
-ppaass-codec = "0.1.5"
-ppaass-crypto = "0.1.3"
+ppaass-protocol = "=0.1.3"
+ppaass-codec = "=0.1.5"
+ppaass-crypto = "=0.1.3"
 tokio = { version = "1", features = ["macros", "time", "net", "io-util", "rt-multi-thread", "fs"] }
 toml = "0"
 thiserror = "1"
